@@ -54,24 +54,19 @@ def test_missing_price_raises():
     with pytest.raises(KeyError):
         parse_markets(broken, pd.Timestamp("2026-06-12T18:00:00Z"))
 
-def test_onefile_outputdir():
-    out_dir = Path("tests/fixtures/snapshots")
-    out_dir.mkdir(exist_ok=True)
+def test_onefile_outputdir(tmp_path):
     snapshot_time = pd.Timestamp("2026-06-12T18:00:00Z")
-    save_snapshot(load_fixture(), snapshot_time, out_dir)
-    assert out_dir.joinpath("20260612T180000Z.parquet").exists()
+    save_snapshot(load_fixture(), snapshot_time, tmp_path)
+    assert (tmp_path / "20260612T180000Z.json").exists()
+    assert len(list(tmp_path.iterdir())) == 1
 
-def test_twofiles_difftimes():
-    out_dir = Path("tests/fixtures/snapshots")
-    out_dir.mkdir(exist_ok=True)
-    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), out_dir)
-    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T19:00:00Z"), out_dir)
-    assert out_dir.joinpath("20260612T180000Z.parquet").exists()
-    assert out_dir.joinpath("20260612T190000Z.parquet").exists()
+def test_twofiles_difftimes(tmp_path):
+    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
+    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T19:00:00Z"), tmp_path)
+    assert (tmp_path / "20260612T180000Z.json").exists()
+    assert (tmp_path / "20260612T190000Z.json").exists()
 
-def test_twofiles_loudfail():
-    out_dir = Path("tests/fixtures/snapshots")
-    out_dir.mkdir(exist_ok=True)
-    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), out_dir)
+def test_twofiles_loudfail(tmp_path):
+    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
     with pytest.raises(FileExistsError):
-        save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), out_dir)
+        save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
