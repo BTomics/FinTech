@@ -54,7 +54,7 @@ def save_snapshot(markets, snapshot_time, output_dir):
     Save markets to a time-stamped json file in the given directory.
     within one output directory, one timestamp = one snapshot, and a collision is an error.
     Args:
-        markets (pd.DataFrame): output of parse_markets.
+         markets (list[dict]): raw market dicts from the API, saved verbatim.
         snapshot_time (pd.Timestamp): snapshot timestamp.
         output_dir (pathlib.Path or str): where to save the file.
 

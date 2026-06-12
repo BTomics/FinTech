@@ -70,3 +70,9 @@ def test_twofiles_loudfail(tmp_path):
     save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
     with pytest.raises(FileExistsError):
         save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
+
+def test_file_contains_input(tmp_path):
+    markets = load_fixture()
+    path = save_snapshot(markets, pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f) == markets
