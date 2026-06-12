@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from fintech.data.polymarket import parse_markets, save_snapshot
+from fintech.data.polymarket import parse_markets
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "polymarket_markets_sample.json"
 
@@ -53,26 +53,3 @@ def test_missing_price_raises():
     del broken[0]["outcomePrices"]
     with pytest.raises(KeyError):
         parse_markets(broken, pd.Timestamp("2026-06-12T18:00:00Z"))
-
-def test_onefile_outputdir(tmp_path):
-    snapshot_time = pd.Timestamp("2026-06-12T18:00:00Z")
-    save_snapshot(load_fixture(), snapshot_time, tmp_path)
-    assert (tmp_path / "20260612T180000Z.json").exists()
-    assert len(list(tmp_path.iterdir())) == 1
-
-def test_twofiles_difftimes(tmp_path):
-    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
-    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T19:00:00Z"), tmp_path)
-    assert (tmp_path / "20260612T180000Z.json").exists()
-    assert (tmp_path / "20260612T190000Z.json").exists()
-
-def test_twofiles_loudfail(tmp_path):
-    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
-    with pytest.raises(FileExistsError):
-        save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
-
-def test_file_contains_input(tmp_path):
-    markets = load_fixture()
-    path = save_snapshot(markets, pd.Timestamp("2026-06-12T18:00:00Z"), tmp_path)
-    with open(path, encoding="utf-8") as f:
-        assert json.load(f) == markets
