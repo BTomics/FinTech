@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from fintech.data.polymarket import parse_markets
+from fintech.data.polymarket import parse_markets, save_snapshot
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "polymarket_markets_sample.json"
 
@@ -54,3 +54,24 @@ def test_missing_price_raises():
     with pytest.raises(KeyError):
         parse_markets(broken, pd.Timestamp("2026-06-12T18:00:00Z"))
 
+def test_onefile_outputdir():
+    out_dir = Path("tests/fixtures/snapshots")
+    out_dir.mkdir(exist_ok=True)
+    snapshot_time = pd.Timestamp("2026-06-12T18:00:00Z")
+    save_snapshot(load_fixture(), snapshot_time, out_dir)
+    assert out_dir.joinpath("20260612T180000Z.parquet").exists()
+
+def test_twofiles_difftimes():
+    out_dir = Path("tests/fixtures/snapshots")
+    out_dir.mkdir(exist_ok=True)
+    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), out_dir)
+    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T19:00:00Z"), out_dir)
+    assert out_dir.joinpath("20260612T180000Z.parquet").exists()
+    assert out_dir.joinpath("20260612T190000Z.parquet").exists()
+
+def test_twofiles_loudfail():
+    out_dir = Path("tests/fixtures/snapshots")
+    out_dir.mkdir(exist_ok=True)
+    save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), out_dir)
+    with pytest.raises(FileExistsError):
+        save_snapshot(load_fixture(), pd.Timestamp("2026-06-12T18:00:00Z"), out_dir)
