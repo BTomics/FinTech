@@ -1,0 +1,28 @@
+# Secrets — never commit (see fintech_coding_guidelines.md §5)
+.env
+
+# Data — raw caches and derived artifacts stay out of git
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Models / experiment outputs
+models/*.pkl
+models/*.txt
+*.lgb
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
