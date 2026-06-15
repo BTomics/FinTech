@@ -1,8 +1,11 @@
-# Pinned per fintech_coding_guidelines.md §5. Deliberately minimal:
-# only what M1 (feed loggers) needs. Later milestones add their own
-# pins when they start (lightgbm, cvxpy, yfinance, ...).
+# Pinned per fintech_coding_guidelines.md §5. Deliberately minimal.
+# Later milestones add their own pins when they start (lightgbm, cvxpy, ...).
 pandas==2.3.1
 pyarrow==20.0.0
 requests==2.32.4
 python-dotenv==1.1.0
 pytest==8.4.1
+
+# M2 — daily equity bars
+yfinance==1.4.1
+exchange_calendars==4.13.2
