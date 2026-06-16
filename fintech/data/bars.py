@@ -1,4 +1,7 @@
-"""Equity daily bars (yfinance): fetching and parsing into tidy frames."""
+"""Equity daily bars (yfinance): fetching, parsing, and upserting tidy frames."""
+
+from numpy import concat
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
@@ -76,3 +79,48 @@ def fetch_bars(tickers, start, end, auto_adjust=False):
         group_by="ticker",
         progress=False,
     )
+
+
+def upsert_bars(new_bars, path):
+    """
+    Merge freshly-parsed bars into the processed parquet store at `path`.
+
+    The daily snapshot re-fetches an overlapping window every run, so this must
+    be idempotent: running it twice over the same dates must NOT create
+    duplicate (date, ticker) rows. (date, ticker) is the primary key; on a
+    collision the *new* row wins, so a later pull can correct an earlier one.
+
+    CONTRACT (assert these in tests/test_bars.py):
+      - If `path` doesn't exist yet, the store is created from `new_bars` alone.
+      - After the call, the store has exactly one row per (date, ticker).
+      - On a (date, ticker) collision, the value from `new_bars` is kept.
+      - Same column order / dtypes / sort as parse_bars output (it's the same
+        data, just accumulated): sorted by (ticker, date), plain int index.
+
+    Args:
+        new_bars (pd.DataFrame): tidy bars from parse_bars (the contract there).
+        path (pathlib.Path or str): processed parquet file (e.g.
+            data/processed/bars.parquet).
+
+    Returns:
+        pd.DataFrame: the full, deduplicated store that was written to `path`.
+    """
+    # TODO: implement until tests/test_bars.py is green
+    #   1. path = Path(path); read existing store if it exists, else skip
+    #   2. concat(existing, new_bars)  -- new rows last so keep="last" favors them
+    #   3. drop_duplicates(["date", "ticker"], keep="last")
+    #   4. sort_values(["ticker", "date"]) -> reset_index(drop=True)
+    #   5. path.parent.mkdir(parents=True, exist_ok=True); to_parquet(path)
+    #   6. return the written frame
+    path = Path(path)
+    try:
+        existing = pd.read_parquet(path)
+        new = pd.concat([existing, new_bars], ignore_index=True, sort=False)
+    except FileNotFoundError:
+        new = new_bars.copy()
+    new = new.drop_duplicates(["date", "ticker"], keep="last")
+    new = new.sort_values(["ticker", "date"])
+    new = new.reset_index(drop=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new.to_parquet(path)
+    return new

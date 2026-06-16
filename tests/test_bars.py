@@ -19,7 +19,7 @@ import exchange_calendars as xcals
 import pandas as pd
 import pytest
 
-from fintech.data.bars import parse_bars
+from fintech.data.bars import parse_bars, upsert_bars
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BARS_PATH = FIXTURES / "equity_bars_sample.parquet"
@@ -102,3 +102,31 @@ def test_malformed_input_raises():
     del raw[("AAPL", "Adj Close")]  # columns are (ticker, field)
     with pytest.raises(KeyError):
         parse_bars(raw)
+
+
+# --- upsert tests ---------------------------------------------------------
+def test_upsert_idempotent(tmp_path):
+    path = tmp_path / "bars.parquet"   # auto-created, auto-cleaned, no unlink
+    # assert that running upsert twice with the same input does not change the output
+    new = parse_bars(load_bars())
+    written = upsert_bars(new, path)
+    written2 = upsert_bars(new, path)
+    pd.testing.assert_frame_equal(written, written2)
+
+def test_upsert_collision(tmp_path):
+    path = tmp_path / "bars.parquet"   # auto-created, auto-cleaned, no unlink
+    original = parse_bars(load_bars())
+    upsert_bars(original, path)
+
+    # re-upsert the same (date, ticker) with a changed price: the new row wins.
+    some_date = original[original["ticker"] == "AAPL"]["date"].iloc[0]
+    modified = original.copy()
+    mask = (modified["ticker"] == "AAPL") & (modified["date"] == some_date)
+    modified.loc[mask, "adj_close"] = -1.0
+    result = upsert_bars(modified, path)
+
+    # new value survived (catches keep="first"), and it replaced rather than appended
+    assert result.loc[
+        (result["ticker"] == "AAPL") & (result["date"] == some_date), "adj_close"
+    ].iloc[0] == -1.0
+    assert len(result) == len(original)
