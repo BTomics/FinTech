@@ -56,7 +56,9 @@ def build_features(bars):
 
     out = pd.DataFrame({"date": bars["date"], "ticker": bars["ticker"]})
     for k in RETURN_LAGS:
-        out[f"ret_lag{k}"] = rg.shift(k)  # r_{t-k}, strictly backward-looking
+        # k-th return feature, shifted so ret_lag1 == r_t (today's return, known
+        # at close t), ret_lag2 == r_{t-1}, ... — all strictly backward-looking.
+        out[f"ret_lag{k}"] = rg.shift(k - 1)
     for w in VOL_WINDOWS:
         # groupby().rolling() returns a (ticker, row) MultiIndex; drop the ticker
         # level so the result realigns onto out's row index.
