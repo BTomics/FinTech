@@ -96,6 +96,8 @@ def generate_mv_weights(returns, mu, lookback=60, rebalance_every=1,
         if (i - (lookback - 1)) % rebalance_every != 0:
             continue  # hold between rebalances
         t = dates[i]
+        if t not in mu.index:
+            continue  # no signal yet at this date (e.g. still in the mu warmup)
         window = returns.iloc[i - lookback + 1:i + 1]  # lookback rows ending AT t
         # Eligible = full trailing history AND a finite signal at t.
         eligible = window.columns[window.notna().all()]

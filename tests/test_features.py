@@ -60,6 +60,7 @@ def test_features_are_causal():
 def test_no_nan_and_tidy_shape():
     """Output is clean and tidy: no NaNs, plain int index, target present."""
     parsed = build_features(parse_bars(load_bars()))
+    assert len(parsed) > 0          # guard: a too-short fixture would empty out
     assert parsed.isna().sum().sum() == 0
     assert list(parsed.columns[:2]) == ["date", "ticker"]
     assert parsed.columns[-1] == "target"

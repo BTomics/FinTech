@@ -31,6 +31,7 @@ REBALANCE_EVERY = 21          # ~monthly
 COMMISSION_BPS = 1.0
 SLIPPAGE_BPS = 9.0
 IMPACT_BPS = 10.0
+SIGNAL_SCALE = 0.01           # maps a 1-sigma composite signal to ~1% expected return
 OPT_KWARGS = dict(risk_aversion=10.0, max_weight=0.10, max_turnover=None, cash_floor=0.0)
 
 
@@ -46,6 +47,26 @@ def _hist_mean_mu(bars, columns):
     frame = features[["date", "ticker"]].copy()
     frame["mu"] = predict_historical_mean(features).to_numpy()
     return frame.pivot(index="date", columns="ticker", values="mu").reindex(columns=columns)
+
+
+def _zscore_by_date(frame, col):
+    """Cross-sectional z-score of `col` within each date."""
+    g = frame.groupby("date")[col]
+    return (frame[col] - g.transform("mean")) / g.transform("std")
+
+
+def _composite_mu(bars, columns):
+    """Composite factor signal: long 12-1 momentum + short-term reversal.
+
+    Each factor is standardised cross-sectionally per day, averaged, then scaled
+    to return-like units so the optimiser's risk term stays meaningful.
+    """
+    f = build_features(bars)
+    z_mom = _zscore_by_date(f, "mom_252_21")   # high momentum -> buy
+    z_rev = -_zscore_by_date(f, "ret_lag1")    # low recent return -> buy (reversal)
+    f = f[["date", "ticker"]].copy()
+    f["mu"] = 0.5 * (z_mom + z_rev) * SIGNAL_SCALE
+    return f.pivot(index="date", columns="ticker", values="mu").reindex(columns=columns)
 
 
 def _summary(net, w=None):
@@ -65,16 +86,16 @@ def main():
     costs = dict(commission_bps=COMMISSION_BPS, slippage_bps=SLIPPAGE_BPS,
                  impact_bps=IMPACT_BPS)
 
-    # Two signals: historical mean (M5 baseline) and short-term reversal (-r_t).
+    # Two signals: historical mean (M5 baseline) and the momentum+reversal composite.
     mu_hist = _hist_mean_mu(bars, returns.columns)
-    mu_rev = -returns  # mu_t = -today's return -> bet on reversal
+    mu_comp = _composite_mu(bars, returns.columns)
 
     mv_hist = generate_mv_weights(returns, mu_hist, lookback=LOOKBACK,
                                   rebalance_every=REBALANCE_EVERY, **OPT_KWARGS)
-    mv_rev = generate_mv_weights(returns, mu_rev, lookback=LOOKBACK,
-                                 rebalance_every=REBALANCE_EVERY, **OPT_KWARGS)
+    mv_comp = generate_mv_weights(returns, mu_comp, lookback=LOOKBACK,
+                                  rebalance_every=REBALANCE_EVERY, **OPT_KWARGS)
 
-    start = max(mv_hist.index[0], mv_rev.index[0])
+    start = max(mv_hist.index[0], mv_comp.index[0])
 
     # Equal-weight over names tradable at the start (non-NaN return that day).
     tradable = returns.loc[start].dropna().index
@@ -83,8 +104,8 @@ def main():
     ).reindex(columns=returns.columns, fill_value=0.0)
 
     paths = {
+        "MV composite": mv_comp,
         "MV hist-mean": mv_hist,
-        "MV reversal": mv_rev,
         "Equal-weight": eq_w,
         f"Buy&Hold {BENCHMARK}": buy_and_hold_weights(returns, BENCHMARK, start=start),
     }
