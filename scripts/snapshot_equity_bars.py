@@ -1,33 +1,30 @@
-"""Daily equity-bars snapshot: fetch -> save raw -> upsert into processed bars.parquet."""
+"""Daily equity-bars snapshot: refresh recent bars for the FULL universe.
+
+Re-fetches a short lookback window for every S&P 500 name (+SPY) and upserts it
+into the processed store. The lookback overlaps previous runs so the idempotent
+upsert self-heals any missed day.
+
+Must cover the WHOLE universe — the strategy trades all of it, so refreshing only
+a handful of names would leave the rest stale (the bug that poisoned the first
+live run). Run after the US close, on a daily schedule.
+"""
 from pathlib import Path
 
 import pandas as pd
 
-from fintech.data.bars import fetch_bars, parse_bars, upsert_bars
-
-UNIVERSE = ["SPY", "AAPL", "MSFT"]      # config at top, not hardcoded in the logic
-LOOKBACK_DAYS = 10                     # DECISION 2
+from fintech.data.bars import refresh_universe_bars
+from fintech.data.universe import load_universe
 
 ROOT = Path(__file__).resolve().parents[1]
-RAW_DIR = ROOT / "data" / "raw" / "equity_bars"
 PROCESSED_PATH = ROOT / "data" / "processed" / "bars.parquet"
-snapshot_time = pd.Timestamp.now(tz="UTC")
-# 1. window
-end = (snapshot_time - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-start = (snapshot_time - pd.Timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+LOOKBACK_DAYS = 10
 
-# 2. fetch raw
-raw = fetch_bars(UNIVERSE, start, end)
+end = pd.Timestamp.now().strftime("%Y-%m-%d")
+start = (pd.Timestamp.now() - pd.Timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
 
-# 3. save raw  --> DECISION 1
-RAW_DIR.mkdir(parents=True, exist_ok=True)
-raw.to_parquet(RAW_DIR / snapshot_time.strftime("%Y%m%dT%H%M%SZ.parquet"))
-
-
-# 4. parse to tidy
-bars = parse_bars(raw)
-
-# 5. upsert into processed: read (if exists) -> concat -> drop_duplicates(["date","ticker"], keep="last") -> sort -> write
-
-written = upsert_bars(bars, PROCESSED_PATH)
-print(PROCESSED_PATH)
+tickers = load_universe()
+written, failed = refresh_universe_bars(tickers, start, end, PROCESSED_PATH)
+print(f"Refreshed {len(tickers)} tickers, {start} -> {end}. "
+      f"Store: {len(written)} rows, {written['ticker'].nunique()} tickers.")
+if failed:
+    print(f"Failed/empty ({len(failed)}): {failed}")

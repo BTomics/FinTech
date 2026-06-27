@@ -48,9 +48,12 @@ def parse_bars(raw_bars):
     raw.columns = ["date", "ticker", "open", "high", "low", "close", "adj_close", "volume"]
     raw["date"] = pd.to_datetime(raw["date"])
     raw["date"] = raw["date"].dt.tz_localize(None)
+    # Drop incomplete bars (NaN source-of-truth price) — an unsettled/partial
+    # fetch is not a real bar, and must never be upserted over good data.
+    raw = raw.dropna(subset=["adj_close"])
     raw = raw.sort_values(["date", "ticker"])
     raw = raw.reset_index(drop=True)
-    
+
     return raw
 
 
@@ -124,3 +127,41 @@ def upsert_bars(new_bars, path):
     path.parent.mkdir(parents=True, exist_ok=True)
     new.to_parquet(path)
     return new
+
+
+def _drop_empty_tickers(raw):
+    """Drop tickers whose columns came back all-NaN (failed download)."""
+    keep = [t for t in raw.columns.get_level_values("Ticker").unique()
+            if not raw[t].isna().all().all()]
+    return raw.loc[:, raw.columns.get_level_values("Ticker").isin(keep)], keep
+
+
+def refresh_universe_bars(tickers, start, end, path, chunk_size=50):
+    """
+    Fetch -> parse -> upsert daily bars for many tickers, robustly.
+
+    Fetches in chunks (gentle on yfinance) and drops tickers that came back
+    empty, so one bad symbol can't abort the batch (parse_bars is strict). Used
+    by both the one-off backfill and the daily snapshot — same code path, only
+    the date window differs.
+
+    Args:
+        tickers (list[str]): symbols to fetch.
+        start, end (str): "YYYY-MM-DD"; end is exclusive (yfinance convention).
+        path: processed parquet store to upsert into.
+        chunk_size (int): tickers per yfinance call.
+
+    Returns:
+        tuple[pd.DataFrame, list[str]]: (written store, failed/empty tickers).
+    """
+    parsed = []
+    failed = []
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i + chunk_size]
+        raw = fetch_bars(chunk, start, end)
+        raw, kept = _drop_empty_tickers(raw)
+        failed += [t for t in chunk if t not in kept]
+        if kept:
+            parsed.append(parse_bars(raw))
+    written = upsert_bars(pd.concat(parsed, ignore_index=True), path)
+    return written, failed
