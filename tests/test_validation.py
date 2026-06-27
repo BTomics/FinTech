@@ -8,7 +8,9 @@ from fintech.models.validation import (
     walk_forward_splits,
     score_predictions,
     run_walk_forward,
+    run_walk_forward_model,
 )
+from fintech.models.gbm import fit_predict_gbm
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BARS_PATH = FIXTURES / "equity_bars_sample.parquet"
@@ -89,3 +91,41 @@ def test_run_walk_forward_detects_misalignment():
 
     assert clean == pytest.approx(0.0, abs=1e-12)
     assert broken > clean
+
+
+def _gbm(train, test):
+    # thin wrapper: silence LightGBM's chatter on tiny folds
+    return fit_predict_gbm(train, test, verbosity=-1)
+
+
+def test_run_walk_forward_model_structure():
+    bars = parse_bars(pd.read_parquet(BARS_PATH))
+    features = build_features(bars)
+    kwargs = dict(window_length=30, horizon=1, test_size=20)
+
+    per_fold, mean = run_walk_forward_model(features, _gbm, **kwargs)
+    n_splits = len(list(walk_forward_splits(features, **kwargs)))
+
+    assert n_splits > 0                      # not vacuous
+    assert len(per_fold) == n_splits         # one score per fold
+    assert all(s >= 0 for s in per_fold)     # MSE is non-negative
+    assert mean == pytest.approx(sum(per_fold) / len(per_fold))
+    assert pd.notna(mean) and mean > 0
+
+
+def test_gbm_exploits_a_leaked_feature():
+    # Leakage guard: add a feature column that IS the answer (== target). A model
+    # fit through the harness should then score near-perfectly. If it does, the
+    # harness/model would expose any real future leak; the fact that the CLEAN
+    # features don't produce this near-zero score is the evidence they don't leak.
+    bars = parse_bars(pd.read_parquet(BARS_PATH))
+    features = build_features(bars)
+    kwargs = dict(window_length=30, horizon=1, test_size=20)
+
+    _, clean = run_walk_forward_model(features, _gbm, **kwargs)
+
+    leaked = features.copy()
+    leaked["leak"] = leaked["target"]  # feature_columns() will pick this up
+    _, leaked_mse = run_walk_forward_model(leaked, _gbm, **kwargs)
+
+    assert leaked_mse < clean  # the leak makes the model dramatically better

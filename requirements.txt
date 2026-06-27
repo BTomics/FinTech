@@ -9,3 +9,7 @@ pytest==8.4.1
 # M2 — daily equity bars
 yfinance==1.4.1
 exchange_calendars==4.13.2
+
+# M3 — baseline prediction pipeline
+lightgbm==4.6.0
+scikit-learn==1.9.0  # LGBMRegressor's sklearn API needs it

@@ -104,3 +104,32 @@ def run_walk_forward(features, predict_fn, **split_kwargs):
                                   features.loc[test_idx, "target"])
         per_fold.append(score)
     return per_fold, sum(per_fold) / len(per_fold)
+
+
+def run_walk_forward_model(features, fit_predict, **split_kwargs):
+    """
+    Score a FITTED model across purged walk-forward folds.
+
+    The fit-on-train seam, for models that are not causal by construction (e.g.
+    LightGBM): each fold fits/predicts inside the loop on its own train/test
+    rows, so the model never sees future data. Mirrors run_walk_forward's return
+    so a model and the baselines are comparable on IDENTICAL splits — pass the
+    same split_kwargs to both (M3 success criterion).
+
+    Args:
+        features (pd.DataFrame): build_features output (has `target`).
+        fit_predict (callable): (train_df, test_df) -> pd.Series of predictions
+            indexed like test_df (e.g. gbm.fit_predict_gbm).
+        **split_kwargs: forwarded to walk_forward_splits.
+
+    Returns:
+        tuple[list[float], float]: (per-fold MSEs, mean MSE).
+    """
+    per_fold = []
+    for train_idx, test_idx in walk_forward_splits(features, **split_kwargs):
+        train_df = features.loc[train_idx]
+        test_df = features.loc[test_idx]
+        preds = fit_predict(train_df, test_df)
+        score = score_predictions(preds, test_df["target"])
+        per_fold.append(score)
+    return per_fold, sum(per_fold) / len(per_fold)
