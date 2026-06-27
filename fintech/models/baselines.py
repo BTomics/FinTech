@@ -28,12 +28,9 @@ def predict_persistence(features):
     Returns:
         pd.Series: predicted next-day return, indexed like `features`.
     """
-    # TODO: predicted r_{t+1} = the freshest return known at close of day t.
-    #   NOTE: that's today's return r_t. With the current lag convention
-    #   (ret_lag1 == r_{t-1}) r_t isn't a column — see the lag-convention
-    #   decision in the handoff before implementing.
-    ...
-
+    
+    prediction = features["ret_lag1"]
+    return prediction.reindex(features.index)
 
 def predict_historical_mean(features):
     """
@@ -48,8 +45,10 @@ def predict_historical_mean(features):
     Returns:
         pd.Series: predicted next-day return, indexed like `features`.
     """
-    # TODO: per ticker (grouped — never pool tickers), expanding mean of the
-    #   returns known through day t. The leakage trap: an expanding mean that
-    #   sweeps in r_{t+1} (the target) is look-ahead. Make sure each row's
-    #   prediction is built only from returns at or before t.
-    ...
+    prediction = (
+        features.groupby("ticker")["ret_lag1"]
+        .expanding().mean()
+        .reset_index(level=0, drop=True)
+    )
+    return prediction
+    
