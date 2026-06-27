@@ -32,6 +32,11 @@ def _zscore(s):
 def latest_target_weights(bars):
     """Composite-strategy target weights for the most recent bar date."""
     px = bars.pivot(index="date", columns="ticker", values="adj_close")
+    # Drop trailing incomplete bars: a partial/failed snapshot can leave a
+    # mostly-NaN row that would poison the cross-section. Keep only dates where
+    # the broad universe is present.
+    coverage = px.notna().mean(axis=1)
+    px = px.loc[coverage > 0.9]
     returns = px.pct_change(fill_method=None)
 
     # Today's factor values (same defs as features/build.py), latest row only.
