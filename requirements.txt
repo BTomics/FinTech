@@ -16,3 +16,6 @@ scikit-learn==1.9.0  # LGBMRegressor's sklearn API needs it; also LedoitWolf (M4
 
 # M4 — portfolio controller (constrained mean-variance)
 cvxpy==1.9.2
+
+# M6 — paper trading (Alpaca)
+alpaca-py==0.43.4
