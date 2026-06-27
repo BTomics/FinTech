@@ -12,4 +12,7 @@ exchange_calendars==4.13.2
 
 # M3 — baseline prediction pipeline
 lightgbm==4.6.0
-scikit-learn==1.9.0  # LGBMRegressor's sklearn API needs it
+scikit-learn==1.9.0  # LGBMRegressor's sklearn API needs it; also LedoitWolf (M4)
+
+# M4 — portfolio controller (constrained mean-variance)
+cvxpy==1.9.2
