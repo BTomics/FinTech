@@ -14,6 +14,7 @@ import pandas as pd
 
 from fintech.features.build import build_features
 from fintech.models.baselines import predict_historical_mean
+from fintech.models.gbm import walk_forward_predict
 from fintech.backtest.engine import (
     buy_and_hold_weights,
     generate_mv_weights,
@@ -69,6 +70,19 @@ def _composite_mu(bars, columns):
     return f.pivot(index="date", columns="ticker", values="mu").reindex(columns=columns)
 
 
+def _lgbm_mu(bars, columns):
+    """LightGBM signal: learns the combination of ALL features, out-of-sample.
+
+    Standardised cross-sectionally and scaled exactly like the composite, so the
+    only difference vs the composite is the signal CONTENT, not the scaling.
+    """
+    f = build_features(bars)
+    f["pred"] = walk_forward_predict(f).to_numpy()
+    f = f.dropna(subset=["pred"])
+    f["mu"] = _zscore_by_date(f, "pred") * SIGNAL_SCALE
+    return f.pivot(index="date", columns="ticker", values="mu").reindex(columns=columns)
+
+
 def _summary(net, w=None):
     out = {
         "CAGR": metrics.cagr(net),
@@ -86,16 +100,16 @@ def main():
     costs = dict(commission_bps=COMMISSION_BPS, slippage_bps=SLIPPAGE_BPS,
                  impact_bps=IMPACT_BPS)
 
-    # Two signals: historical mean (M5 baseline) and the momentum+reversal composite.
-    mu_hist = _hist_mean_mu(bars, returns.columns)
+    # Signals: momentum+reversal composite (hand-weighted) vs LightGBM (learned).
     mu_comp = _composite_mu(bars, returns.columns)
+    mu_lgbm = _lgbm_mu(bars, returns.columns)
 
-    mv_hist = generate_mv_weights(returns, mu_hist, lookback=LOOKBACK,
-                                  rebalance_every=REBALANCE_EVERY, **OPT_KWARGS)
     mv_comp = generate_mv_weights(returns, mu_comp, lookback=LOOKBACK,
                                   rebalance_every=REBALANCE_EVERY, **OPT_KWARGS)
+    mv_lgbm = generate_mv_weights(returns, mu_lgbm, lookback=LOOKBACK,
+                                  rebalance_every=REBALANCE_EVERY, **OPT_KWARGS)
 
-    start = max(mv_hist.index[0], mv_comp.index[0])
+    start = max(mv_comp.index[0], mv_lgbm.index[0])
 
     # Equal-weight over names tradable at the start (non-NaN return that day).
     tradable = returns.loc[start].dropna().index
@@ -105,7 +119,7 @@ def main():
 
     paths = {
         "MV composite": mv_comp,
-        "MV hist-mean": mv_hist,
+        "MV lgbm": mv_lgbm,
         "Equal-weight": eq_w,
         f"Buy&Hold {BENCHMARK}": buy_and_hold_weights(returns, BENCHMARK, start=start),
     }

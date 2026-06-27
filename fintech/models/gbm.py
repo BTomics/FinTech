@@ -12,6 +12,7 @@ whole-panel run_walk_forward.
 """
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 # Everything in build_features output that isn't an identifier or the label.
 NON_FEATURES = ("date", "ticker", "target")
@@ -57,3 +58,34 @@ def fit_predict_gbm(train, test, **params):
     preds = model.predict(test_x)
 
     return pd.Series(preds, index=test.index)
+
+
+def walk_forward_predict(features, retrain_every=252, min_train=504, **params):
+    """
+    Out-of-sample predictions over the whole panel via expanding-window refits.
+
+    Walks the unique dates forward: every `retrain_every` dates, refit on ALL
+    rows strictly BEFORE the current block, then predict that block. Causal —
+    each prediction uses only earlier dates. Refitting periodically (not per day)
+    keeps it tractable on a wide panel while staying leak-free.
+
+    Args:
+        features (pd.DataFrame): build_features output (date, ticker, feats, target).
+        retrain_every (int): refit cadence, in unique dates.
+        min_train (int): dates of history required before the first prediction.
+        **params: passed to the LightGBM regressor.
+
+    Returns:
+        pd.Series: predictions aligned to features.index; NaN before min_train.
+    """
+    cols = feature_columns(features)
+    dates = np.sort(features["date"].unique())
+    preds = pd.Series(np.nan, index=features.index)
+    for start in range(min_train, len(dates), retrain_every):
+        split_date = dates[start]
+        block = dates[start:start + retrain_every]
+        train = features[features["date"] < split_date]   # strictly earlier
+        test = features[features["date"].isin(block)]
+        model = lgb.LGBMRegressor(**params, verbose=-1).fit(train[cols], train["target"])
+        preds.loc[test.index] = model.predict(test[cols])
+    return preds

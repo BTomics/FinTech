@@ -140,6 +140,22 @@ def test_ic_is_rank_based_not_scale_based():
     assert information_coefficient(f, preds) == pytest.approx(1.0)
 
 
+def test_walk_forward_predict_is_oos_and_causal():
+    from fintech.models.gbm import walk_forward_predict
+    bars = parse_bars(pd.read_parquet(BARS_PATH))
+    features = build_features(bars)
+    n_dates = features["date"].nunique()
+    min_train = n_dates // 2
+
+    preds = walk_forward_predict(features, retrain_every=10**9, min_train=min_train)
+
+    assert preds.index.equals(features.index)         # aligned
+    # Nothing predicted before the warmup; something predicted after.
+    early = features["date"] < features["date"].sort_values().unique()[min_train]
+    assert preds[early.to_numpy()].isna().all()
+    assert preds[~early.to_numpy()].notna().any()
+
+
 def test_gbm_exploits_a_leaked_feature():
     # Leakage guard: add a feature column that IS the answer (== target). A model
     # fit through the harness should then score near-perfectly. If it does, the
