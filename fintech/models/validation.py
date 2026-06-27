@@ -1,3 +1,4 @@
+import pandas as pd
 
 
 def walk_forward_splits(features, window_length=30, horizon=1, test_size=1):
@@ -133,3 +134,36 @@ def run_walk_forward_model(features, fit_predict, **split_kwargs):
         score = score_predictions(preds, test_df["target"])
         per_fold.append(score)
     return per_fold, sum(per_fold) / len(per_fold)
+
+
+def information_coefficient(features, predictions):
+    """
+    Mean daily cross-sectional rank IC of a return signal.
+
+    For each date, rank the universe by predicted return and by realised return
+    (the `target`), and take the Spearman correlation between the two rankings;
+    average over days. This measures whether the signal ORDERS assets correctly
+    — exactly what a cross-sectional allocator exploits — and unlike MSE it's
+    scale-free and robust to outliers. IC ~ 0 means no edge; > 0 means the signal
+    ranks winners above losers on average (a daily IC of even 0.02-0.05 is a
+    real signal in equities).
+
+    Needs a cross-section (>= 2 names per date) to be meaningful; days with one
+    name or zero rank-variance yield NaN and are dropped.
+
+    Args:
+        features (pd.DataFrame): build_features output (has `date`, `target`).
+        predictions (pd.Series): predicted returns aligned to `features`' index.
+
+    Returns:
+        float: mean daily Spearman rank IC.
+    """
+    df = pd.DataFrame({
+        "date": features["date"].to_numpy(),
+        "pred": predictions.to_numpy(),
+        "target": features["target"].to_numpy(),
+    })
+    daily_ic = df.groupby("date")[["pred", "target"]].apply(
+        lambda g: g["pred"].corr(g["target"], method="spearman")
+    )
+    return daily_ic.dropna().mean()

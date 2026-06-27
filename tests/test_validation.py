@@ -9,6 +9,7 @@ from fintech.models.validation import (
     score_predictions,
     run_walk_forward,
     run_walk_forward_model,
+    information_coefficient,
 )
 from fintech.models.gbm import fit_predict_gbm
 
@@ -111,6 +112,32 @@ def test_run_walk_forward_model_structure():
     assert all(s >= 0 for s in per_fold)     # MSE is non-negative
     assert mean == pytest.approx(sum(per_fold) / len(per_fold))
     assert pd.notna(mean) and mean > 0
+
+
+def _xs_frame():
+    # 3 dates x 3 tickers, target strictly ordered A < B < C each day.
+    rows = []
+    for d in pd.date_range("2021-01-01", periods=3):
+        for ticker, tgt in zip(["A", "B", "C"], [0.01, 0.02, 0.03]):
+            rows.append({"date": d, "ticker": ticker, "target": tgt})
+    return pd.DataFrame(rows)
+
+
+def test_ic_perfect_signal_is_one():
+    f = _xs_frame()
+    assert information_coefficient(f, f["target"]) == pytest.approx(1.0)
+
+
+def test_ic_reversed_signal_is_minus_one():
+    f = _xs_frame()
+    assert information_coefficient(f, -f["target"]) == pytest.approx(-1.0)
+
+
+def test_ic_is_rank_based_not_scale_based():
+    # Any strictly-increasing transform of a perfect signal still ranks perfectly.
+    f = _xs_frame()
+    preds = f["target"] * 1000 + 7  # monotonic -> same ranks
+    assert information_coefficient(f, preds) == pytest.approx(1.0)
 
 
 def test_gbm_exploits_a_leaked_feature():

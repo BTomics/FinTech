@@ -181,3 +181,6 @@ def test_costs_make_zero_skill_signal_lose_to_buy_and_hold():
     strat_total = (1 + strat_net).prod()
     bnh_total = (1 + bnh_net).prod()
     assert strat_total < bnh_total
+
+
+# (IC tests live in test_validation.py — kept with the other validation metrics.)
