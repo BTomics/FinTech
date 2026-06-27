@@ -22,7 +22,7 @@ from fintech.backtest.costs import apply_costs
 from fintech.portfolio.optimizer import estimate_covariance, optimize_weights
 
 
-def simulate(weights, returns, commission_bps=1.0, slippage_bps=5.0):
+def simulate(weights, returns, **cost_kwargs):
     """
     Net per-period portfolio returns from a target-weight path.
 
@@ -35,7 +35,8 @@ def simulate(weights, returns, commission_bps=1.0, slippage_bps=5.0):
         weights (pd.DataFrame): target weights, one row per date held, columns =
             assets. Held (carried forward) until the next row.
         returns (pd.DataFrame): realised per-period asset returns, same columns.
-        commission_bps, slippage_bps (float): passed to apply_costs.
+        **cost_kwargs: forwarded to apply_costs (commission_bps, slippage_bps,
+            impact_bps).
 
     Returns:
         pd.Series: net per-period portfolio returns, indexed by date.
@@ -46,20 +47,22 @@ def simulate(weights, returns, commission_bps=1.0, slippage_bps=5.0):
     for date in returns.index:
         # Earn this period's return on the book held coming INTO the day — i.e.
         # weights decided on an earlier date, never this period's new target.
-        gross = (w_held * returns.loc[date]).sum()
+        # fillna(0): ineligible names carry weight 0, so a NaN there is harmless.
+        gross = (w_held * returns.loc[date].fillna(0.0)).sum()
         cost = 0.0
         if date in weights.index:
             # Rebalance at the close: charge the trade, then the new book takes
             # effect for the NEXT period.
             w_target = weights.loc[date]
             turnover = (w_target - w_held).abs().sum()
-            cost = apply_costs(turnover, commission_bps, slippage_bps)
+            cost = apply_costs(turnover, **cost_kwargs)
             w_held = w_target
         net_returns.loc[date] = gross - cost
     return net_returns
 
 
-def generate_mv_weights(returns, mu, lookback=60, rebalance_every=1, **opt_kwargs):
+def generate_mv_weights(returns, mu, lookback=60, rebalance_every=1,
+                        min_names=2, **opt_kwargs):
     """
     Walk forward producing constrained mean-variance target weights, causally.
 
@@ -68,31 +71,44 @@ def generate_mv_weights(returns, mu, lookback=60, rebalance_every=1, **opt_kwarg
     optimize_weights against the previous book. Between rebalances the book is
     held.
 
+    DYNAMIC UNIVERSE: a wide panel is ragged (names IPO at different dates), so
+    at each t only names with a COMPLETE trailing window AND a finite signal are
+    eligible — the rest can't have a covariance estimated and are skipped. Weights
+    are returned over the full column set with 0 for ineligible names.
+
     Args:
-        returns (pd.DataFrame): realised per-period asset returns (date x asset).
-        mu (pd.DataFrame): expected-return signal per (date, asset) — the M3
-            prediction, one row per date aligned to `returns`' columns.
+        returns (pd.DataFrame): realised per-period asset returns (date x asset),
+            NaN allowed before a name's listing.
+        mu (pd.DataFrame): expected-return signal per (date, asset).
         lookback (int): trailing window length for estimate_covariance.
         rebalance_every (int): rebalance cadence in periods (1 = daily).
-        **opt_kwargs: forwarded to optimize_weights (risk_aversion, max_weight,
-            max_turnover, cash_floor).
+        min_names (int): skip a rebalance with fewer eligible names than this.
+        **opt_kwargs: forwarded to optimize_weights.
 
     Returns:
-        pd.DataFrame: target weights, one row per rebalance date, columns = assets.
+        pd.DataFrame: target weights, one row per rebalance date, columns = the
+            full asset set (0 for names not held / not eligible).
     """
     dates = returns.index
     weights = {}
-    w_prev = None
-    # Need a full lookback window before the first rebalance, so start at the
-    # date in position lookback-1 (its trailing window ends AT it, past only).
+    w_prev = pd.Series(0.0, index=returns.columns)  # full-universe book
     for i in range(lookback - 1, len(dates)):
         if (i - (lookback - 1)) % rebalance_every != 0:
             continue  # hold between rebalances
         t = dates[i]
         window = returns.iloc[i - lookback + 1:i + 1]  # lookback rows ending AT t
-        cov = estimate_covariance(window)
-        mu_t = mu.loc[t]  # signal known at t — nothing after t feeds the optimiser
-        w_prev = optimize_weights(mu_t, cov, w_prev=w_prev, **opt_kwargs)
+        # Eligible = full trailing history AND a finite signal at t.
+        eligible = window.columns[window.notna().all()]
+        mu_t = mu.loc[t]
+        eligible = [c for c in eligible if pd.notna(mu_t.get(c))]
+        if len(eligible) < min_names:
+            continue
+        cov = estimate_covariance(window[eligible])
+        # Pass the full prior book; optimize_weights reindexes it to `eligible`,
+        # so names that dropped out naturally contribute 0 to turnover.
+        w_sub = optimize_weights(mu_t[eligible], cov, w_prev=w_prev, **opt_kwargs)
+        w_prev = pd.Series(0.0, index=returns.columns)
+        w_prev[eligible] = w_sub
         weights[t] = w_prev
     return pd.DataFrame(weights).T
 

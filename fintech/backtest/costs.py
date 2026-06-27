@@ -1,16 +1,20 @@
-"""Trading cost model for the backtester (M5).
+"""Trading cost model for the backtester (M5/M7).
 
-The simplest defensible model: a linear cost in basis points charged on the
-notional traded at each rebalance. Commission + slippage, both in bps. Costs are
-mandatory in M5 — a strategy that looks good gross but churns heavily must be
-seen to lose once they bite (development_plan M5 success criterion).
+Two parts:
+  - LINEAR (commission + slippage, in bps): a flat cost per unit of notional
+    traded — fine for small trades.
+  - CONVEX market impact (impact_bps, in bps): your own trades push the price
+    against you, and the push grows with trade size, so cost per unit RISES with
+    turnover. Modelled as a quadratic term — the standard cheap proxy for
+    Almgren-style impact. This is what makes a high-turnover strategy pay for its
+    churn instead of getting away with a flat fee.
 
 1 bp = 0.01% = 1e-4. "Notional traded" for one rebalance is the turnover
 sum(|w_t - w_prev|): every unit of weight that moves is a unit traded.
 """
 
 
-def apply_costs(turnover, commission_bps=1.0, slippage_bps=5.0):
+def apply_costs(turnover, commission_bps=1.0, slippage_bps=5.0, impact_bps=0.0):
     """
     Cost of one rebalance, as a fraction of portfolio value.
 
@@ -21,9 +25,13 @@ def apply_costs(turnover, commission_bps=1.0, slippage_bps=5.0):
             of the book traded (0 = no trade, 2 = fully flip a long book).
         commission_bps (float): broker commission per unit traded, in bps.
         slippage_bps (float): assumed slippage per unit traded, in bps.
+        impact_bps (float): convex market-impact coefficient, in bps; cost from
+            this term scales with turnover SQUARED (big rebalances cost more per
+            unit). 0 recovers the pure linear model.
 
     Returns:
         float: cost as a fraction of portfolio value (e.g. 0.0006 == 6 bps).
     """
-    total_bps = commission_bps + slippage_bps
-    return (total_bps / 10_000.0) * turnover  # 1 bp = 1e-4
+    linear = (commission_bps + slippage_bps) / 10_000.0 * turnover  # 1 bp = 1e-4
+    impact = impact_bps / 10_000.0 * turnover ** 2
+    return linear + impact

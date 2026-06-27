@@ -38,6 +38,16 @@ def test_apply_costs_zero_turnover():
     assert apply_costs(0.0, commission_bps=1.0, slippage_bps=5.0) == 0.0
 
 
+def test_apply_costs_convex_impact():
+    # Linear 6 bps on turnover 2 = 0.0012; impact 10 bps * turnover^2 = 0.001*4 = 0.004.
+    cost = apply_costs(2.0, commission_bps=1.0, slippage_bps=5.0, impact_bps=10.0)
+    assert cost == pytest.approx(0.0012 + 0.004)
+    # Impact is convex: doubling turnover MORE than doubles the impact component.
+    c1 = apply_costs(1.0, commission_bps=0.0, slippage_bps=0.0, impact_bps=10.0)
+    c2 = apply_costs(2.0, commission_bps=0.0, slippage_bps=0.0, impact_bps=10.0)
+    assert c2 > 2 * c1
+
+
 # --------------------------------------------------------------------------- #
 # metrics
 # --------------------------------------------------------------------------- #
