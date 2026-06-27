@@ -13,8 +13,8 @@ import os
 
 import pandas as pd
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
+from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 
 def get_client():
@@ -72,3 +72,30 @@ def submit_orders(client, orders):
             records.append({"symbol": symbol, "qty": float(qty),
                             "order_id": None, "status": f"ERROR: {exc}"})
     return records
+
+
+def get_recent_orders(client, after=None, limit=500):
+    """
+    Recent orders with fill info, for intended-vs-filled reconciliation.
+
+    Args:
+        client: alpaca TradingClient.
+        after (datetime | None): only orders submitted after this time.
+        limit (int): max orders to fetch.
+
+    Returns:
+        pd.DataFrame: one row per order — symbol, side, intended qty, filled_qty,
+            filled_avg_price, status, submitted_at.
+    """
+    request = GetOrdersRequest(status=QueryOrderStatus.ALL, after=after, limit=limit)
+    orders = client.get_orders(filter=request)
+    rows = [{
+        "symbol": o.symbol,
+        "side": str(o.side).split(".")[-1],
+        "intended_qty": float(o.qty) if o.qty else None,
+        "filled_qty": float(o.filled_qty or 0),
+        "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price else None,
+        "status": str(o.status).split(".")[-1],
+        "submitted_at": o.submitted_at,
+    } for o in orders]
+    return pd.DataFrame(rows)
