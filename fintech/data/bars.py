@@ -1,10 +1,19 @@
 """Equity daily bars (yfinance): fetching, parsing, and upserting tidy frames."""
 
-from numpy import concat
 from pathlib import Path
 
+import exchange_calendars as xcals
 import pandas as pd
 import yfinance as yf
+
+# How long after the official close a daily bar must wait before we trust it.
+# yfinance returns a *provisional* bar for the in-progress / just-closed US
+# session (non-NaN but not final, and it arrives ticker-by-ticker), so writing
+# it lands the latest date in the store ragged and revisable. Two hours clears
+# the settlement window and means the daily 22:30-local snapshot (~30 min after
+# close) defers today's bar to the next run, which re-fetches it via the
+# overlapping lookback once it's final.
+SETTLE_BUFFER = pd.Timedelta(hours=2)
 
 
 def parse_bars(raw_bars):
@@ -136,6 +145,49 @@ def _drop_empty_tickers(raw):
     return raw.loc[:, raw.columns.get_level_values("Ticker").isin(keep)], keep
 
 
+def drop_incomplete_sessions(bars, now=None, calendar="XNYS", buffer=SETTLE_BUFFER):
+    """
+    Drop trailing bars whose trading session hasn't fully closed + settled yet.
+
+    The daily snapshot re-fetches a recent window after the US close, but
+    yfinance hands back a *provisional* bar for the in-progress / just-closed
+    session: the values are non-NaN (so parse_bars' adj_close dropna keeps them)
+    yet not final, and different tickers update at different moments. Writing
+    that session leaves the latest date in the store with ragged coverage and
+    revisable prices — the bug that poisoned the live cross-section (and the
+    reason paper_trade has to filter on coverage>0.9).
+
+    A session is trustworthy only once its official exchange close plus a
+    settlement `buffer` is in the past. Everything on or after that cutoff is
+    dropped here; the overlapping daily lookback re-fetches and writes it on a
+    later run once it has settled, so nothing is permanently lost.
+
+    Args:
+        bars (pd.DataFrame): tidy bars (parse_bars output); needs a `date`
+            column of tz-naive midnight Timestamps.
+        now (pd.Timestamp | None): reference "current time"; defaults to now in
+            UTC. A tz-naive value is assumed to be UTC. (Injectable for tests.)
+        calendar (str): exchange_calendars code for the session schedule.
+        buffer (pd.Timedelta): how long past the close a bar must be to count.
+
+    Returns:
+        pd.DataFrame: `bars` with un-settled trailing sessions removed.
+    """
+    if bars.empty:
+        return bars
+    now = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    if now.tzinfo is None:
+        now = now.tz_localize("UTC")
+
+    # closes: Series indexed by tz-naive session midnight, values tz-aware UTC.
+    closes = xcals.get_calendar(calendar).closes
+    settled = closes[closes + buffer <= now]
+    if settled.empty:
+        return bars.iloc[0:0]
+    cutoff = settled.index[-1]            # last fully-settled session (midnight)
+    return bars[bars["date"] <= cutoff]
+
+
 def refresh_universe_bars(tickers, start, end, path, chunk_size=50):
     """
     Fetch -> parse -> upsert daily bars for many tickers, robustly.
@@ -163,5 +215,9 @@ def refresh_universe_bars(tickers, start, end, path, chunk_size=50):
         failed += [t for t in chunk if t not in kept]
         if kept:
             parsed.append(parse_bars(raw))
-    written = upsert_bars(pd.concat(parsed, ignore_index=True), path)
+    fresh = pd.concat(parsed, ignore_index=True)
+    # Never write a session that hasn't settled — keeps the latest store date
+    # complete and stable across tickers (see drop_incomplete_sessions).
+    fresh = drop_incomplete_sessions(fresh)
+    written = upsert_bars(fresh, path)
     return written, failed

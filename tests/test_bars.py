@@ -19,7 +19,7 @@ import exchange_calendars as xcals
 import pandas as pd
 import pytest
 
-from fintech.data.bars import parse_bars, upsert_bars
+from fintech.data.bars import drop_incomplete_sessions, parse_bars, upsert_bars
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BARS_PATH = FIXTURES / "equity_bars_sample.parquet"
@@ -130,3 +130,35 @@ def test_upsert_collision(tmp_path):
         (result["ticker"] == "AAPL") & (result["date"] == some_date), "adj_close"
     ].iloc[0] == -1.0
     assert len(result) == len(original)
+
+
+# --- settlement filter (the snapshot "corrupt latest bar" fix) ---------------
+
+def test_drop_incomplete_sessions_keeps_settled_drops_unsettled():
+    # Three real consecutive NYSE sessions (Wed/Thu/Fri); each closes 20:00 UTC.
+    dates = pd.to_datetime(["2026-06-24", "2026-06-25", "2026-06-26"])
+    bars = pd.DataFrame(
+        {
+            "date": list(dates) * 2,
+            "ticker": ["AAPL"] * 3 + ["MSFT"] * 3,
+            "adj_close": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        }
+    )
+    # "now" = 21:00 UTC on the 26th: the 26th's close+2h (22:00) is still in the
+    # future (unsettled, provisional), the 24th/25th are well past settlement.
+    now = pd.Timestamp("2026-06-26 21:00", tz="UTC")
+    kept = drop_incomplete_sessions(bars, now=now)
+
+    assert set(kept["date"]) == {dates[0], dates[1]}   # 24th, 25th survive
+    assert dates[2] not in set(kept["date"])           # 26th (unsettled) dropped
+    # both tickers' rows for a surviving session are kept (no per-ticker raggedness)
+    assert (kept["date"] == dates[1]).sum() == 2
+
+
+def test_drop_incomplete_sessions_keeps_all_when_fully_settled():
+    dates = pd.to_datetime(["2026-06-24", "2026-06-25", "2026-06-26"])
+    bars = pd.DataFrame({"date": dates, "ticker": "AAPL", "adj_close": [1.0, 2.0, 3.0]})
+    # A week later everything has long settled -> nothing is dropped.
+    now = pd.Timestamp("2026-07-03 12:00", tz="UTC")
+    kept = drop_incomplete_sessions(bars, now=now)
+    assert set(kept["date"]) == set(dates)
