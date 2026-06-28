@@ -56,17 +56,28 @@ def _zscore_by_date(frame, col):
     return (frame[col] - g.transform("mean")) / g.transform("std")
 
 
-def _composite_mu(bars, columns):
-    """Composite factor signal: long 12-1 momentum + short-term reversal.
+def _composite_mu(bars, columns, include_illiq=True):
+    """Composite factor signal: 12-1 momentum + short reversal + illiquidity.
 
     Each factor is standardised cross-sectionally per day, averaged, then scaled
     to return-like units so the optimiser's risk term stays meaningful.
+
+    The Amihud-illiquidity leg was added after the factor-lab screen + an A/B
+    backtest: it's decorrelated from momentum/reversal and, being a slow factor,
+    cuts turnover (1.32 -> 0.98) and lifts net Sharpe (1.09 -> 1.28) under the
+    convex cost model. include_illiq=False reverts to the 2-factor composite (the
+    A/B knob). NOTE: magnitude is survivorship-inflated (illiquid names delist);
+    the turnover/cost benefit is the survivorship-robust part.
     """
     f = build_features(bars)
-    z_mom = _zscore_by_date(f, "mom_252_21")   # high momentum -> buy
-    z_rev = -_zscore_by_date(f, "ret_lag1")    # low recent return -> buy (reversal)
+    legs = [
+        _zscore_by_date(f, "mom_252_21"),    # high momentum -> buy
+        -_zscore_by_date(f, "ret_lag1"),     # low recent return -> buy (reversal)
+    ]
+    if include_illiq:
+        legs.append(_zscore_by_date(f, "illiq_20"))  # high illiquidity -> buy
     f = f[["date", "ticker"]].copy()
-    f["mu"] = 0.5 * (z_mom + z_rev) * SIGNAL_SCALE
+    f["mu"] = (sum(legs) / len(legs)) * SIGNAL_SCALE
     return f.pivot(index="date", columns="ticker", values="mu").reindex(columns=columns)
 
 

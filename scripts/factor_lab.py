@@ -40,11 +40,12 @@ BARS_PATH = "data/processed/bars.parquet"
 CANDIDATES = {
     "mom_252_21": lambda f: f["mom_252_21"],     # 12-1 momentum  (in composite)
     "reversal_1d": lambda f: -f["ret_lag1"],     # short reversal (in composite)
-    # TODO: add candidates to screen, e.g.
-    #   "low_vol":      lambda f: -f["vol_20"]        (low-volatility anomaly)
-    #   "illiquidity":  lambda f: ... (Amihud-style, from rvol / returns)
-    #   "reversal_5d":  lambda f: -f["ret_lag5"]      (longer reversal)
-    #   "mom_126":      lambda f: f["mom_126"]        (6-month momentum)
+    # Candidates to screen against the two above (keep only if real t-stat AND
+    # decorrelated from momentum/reversal):
+    "mom_126":     lambda f: f["mom_126"],       # 6-month momentum
+    "reversal_5d": lambda f: -f["ret_lag5"],     # 1-week reversal
+    "low_vol":     lambda f: -f["vol_20"],       # low-volatility anomaly
+    "illiquidity": lambda f: f["illiq_20"],      # Amihud illiquidity premium
 }
 
 
@@ -65,7 +66,17 @@ def daily_rank_ic(features, signal):
     # TODO: per date, spearman corr between `signal` and features["target"].
     #   Mirror information_coefficient's grouping; return the daily series
     #   (drop NaN days) instead of .mean(). The mean of this == information_coefficient.
-    raise NotImplementedError
+    aligned = features.assign(signal=signal).dropna(subset=["date", "target", "signal"])
+    # Per-date Spearman corr without groupby.apply (deprecated on grouping cols):
+    # corr() on the two columns gives a (date, var) x var frame; pull the
+    # signal-row / target-column cell per date.
+    ic_per_day = (
+        aligned.groupby("date")[["signal", "target"]]
+        .corr(method="spearman")
+        .xs("signal", level=1)["target"]
+    )
+    ic_per_day = ic_per_day.dropna()  # drop days with < 2 ranked names
+    return ic_per_day
 
 
 def ic_table(features, candidates):
@@ -86,7 +97,25 @@ def ic_table(features, candidates):
     # TODO: for each candidate, signal = fn(features); ic = daily_rank_ic(...);
     #   row = {mean_ic: ic.mean(), ic_t: ic.mean()/ic.std()*sqrt(len(ic)),
     #          n_days: len(ic)}. Assemble -> DataFrame, sort by ic_t desc.
-    raise NotImplementedError
+    rows = []
+    for name, fn in candidates.items():
+        signal = fn(features)
+        ic = daily_rank_ic(features, signal)
+        n = len(ic)
+        std = ic.std()
+        # t-stat undefined for a single day (std of one value). A zero-variance IC
+        # (every day identical) is a degenerate "infinitely significant" edge ->
+        # signed inf, computed explicitly so we don't divide by zero.
+        if n <= 1:
+            ic_t = np.nan
+        elif std == 0:
+            ic_t = np.sign(ic.mean()) * np.inf
+        else:
+            ic_t = ic.mean() / std * np.sqrt(n)
+        rows.append({"mean_ic": ic.mean(), "ic_t": ic_t, "n_days": n})
+    return pd.DataFrame(rows, index=candidates.keys()).sort_values(
+        "ic_t", ascending=False
+    )
 
 
 def factor_correlation(features, candidates):
@@ -107,7 +136,14 @@ def factor_correlation(features, candidates):
     # TODO: build a DataFrame of factor columns {name: fn(features)}, then either
     #   .corr(method="spearman") pooled, or average a per-date rank corr. Keep the
     #   diagonal 1.0; off-diagonals near 0 = the factors are independent bets.
-    raise NotImplementedError
+    panel = features.assign(
+        **{name: fn(features) for name, fn in candidates.items()}
+    )
+    # Drop rows where ALL candidate factor values are missing (no basis for ranking)
+    panel = panel.dropna(subset=list(candidates.keys()), how="all")
+    # Compute pooled Spearman correlation
+    corr_matrix = panel[list(candidates.keys())].corr(method="spearman")
+    return corr_matrix
 
 
 def main():

@@ -14,10 +14,13 @@ import pandas as pd
 #               most recent month, which is reversal, not momentum)
 #   vol_*     rolling stdev of daily returns    -> realised volatility / risk
 #   rvol_*    today's volume / its W-day mean    -> relative volume (activity)
+#   illiq_*   mean |return| / dollar volume      -> Amihud (2002) illiquidity:
+#             price impact per dollar traded; higher = more illiquid
 RETURN_LAGS = [1, 2, 3, 5, 10]
 MOM_WINDOWS = [21, 63, 126, 252]   # ~1, 3, 6, 12 months
 VOL_WINDOWS = [10, 20, 63]
 VOLUME_WINDOWS = [20, 63]
+ILLIQ_WINDOWS = [20, 63]
 
 
 def build_features(bars):
@@ -79,6 +82,14 @@ def build_features(bars):
         # active). Uses volume through t only.
         avg_vol = vg.rolling(w).mean().reset_index(level=0, drop=True)
         out[f"rvol_{w}"] = bars["volume"] / avg_vol
+    # Amihud illiquidity: the daily |return| / dollar-volume ratio (price impact
+    # per dollar traded), averaged over the past w days. Built from r (today's
+    # return) and today's dollar volume — both known at close t, so causal.
+    # Zero-volume days make this inf; the replace([inf], nan) below clears them.
+    daily_illiq = r.abs() / (bars["adj_close"] * bars["volume"])
+    ig = daily_illiq.groupby(bars["ticker"])
+    for w in ILLIQ_WINDOWS:
+        out[f"illiq_{w}"] = ig.rolling(w).mean().reset_index(level=0, drop=True)
     out["target"] = rg.shift(-1)  # r_{t+1} — the one deliberate look-ahead
 
     # Guard against div-by-zero (e.g. a zero-volume window) producing inf, which

@@ -12,6 +12,7 @@ perturbing a future price must not move any past feature.
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from fintech.data.bars import parse_bars
@@ -55,6 +56,29 @@ def test_features_are_causal():
     # place the shock may land.
     feature_cols = [c for c in base.columns if c != "target"]
     pd.testing.assert_frame_equal(base[feature_cols], shocked[feature_cols])
+
+
+def test_illiquidity_is_inverse_dollar_volume():
+    """Amihud illiquidity scales as 1 / dollar volume.
+
+    Two tickers on an identical price path (so identical |returns|) but one trades
+    at 10x the volume of the other. Since illiq = mean(|r| / (price*volume)) and
+    only volume differs, the thin name's illiq_20 must be ~10x the liquid name's —
+    a behavioural check of the factor, not a re-derivation of the formula.
+    """
+    n = 300  # > 252 warmup so rows survive the dropna
+    dates = pd.bdate_range("2020-01-01", periods=n)
+    price = 100.0 * (1.01 ** np.arange(n))  # steady uptrend -> nonzero returns
+    rows = []
+    for ticker, vol in [("THIN", 1e5), ("LIQUID", 1e6)]:
+        for d, p in zip(dates, price):
+            rows.append({"date": d, "ticker": ticker, "adj_close": p, "volume": vol})
+    feats = build_features(pd.DataFrame(rows))
+
+    thin = feats.loc[feats["ticker"] == "THIN", "illiq_20"].to_numpy()
+    liquid = feats.loc[feats["ticker"] == "LIQUID", "illiq_20"].to_numpy()
+    assert (thin > liquid).all()                       # thinner name is more illiquid
+    np.testing.assert_allclose(thin / liquid, 10.0)    # exactly inverse to volume
 
 
 def test_no_nan_and_tidy_shape():
