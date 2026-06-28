@@ -102,6 +102,35 @@ def max_drawdown(returns):
     return drawdowns.min()
 
 
+def calmar(returns, periods_per_year=PERIODS_PER_YEAR):
+    """
+    Calmar ratio: compound growth per unit of worst drawdown.
+
+    The single ship/no-ship number for the M9 risk overlay — it asks whether the
+    drawdown protection actually bought risk-adjusted growth, not just lower
+    return. Defined as cagr / |max_drawdown| (a flat curve with no drawdown is
+    undefined; return inf or nan rather than dividing by zero).
+
+    CONTRACT (assert in tests/test_risk_overlay.py):
+      - calmar == cagr / abs(max_drawdown) for a series with a real drawdown.
+      - max_drawdown == 0 (monotonic curve) -> not a ZeroDivisionError (inf/nan).
+
+    Args:
+        returns (pd.Series): per-period simple returns.
+        periods_per_year (int): annualisation for the cagr term.
+
+    Returns:
+        float: cagr / |max drawdown|.
+    """
+    mdd = max_drawdown(returns)
+    if mdd == 0:
+        # No drawdown: growth per unit of pain is undefined. inf if it grew,
+        # nan if perfectly flat — never a ZeroDivisionError.
+        grew = cagr(returns, periods_per_year) > 0
+        return np.inf if grew else np.nan
+    return cagr(returns, periods_per_year) / abs(mdd)
+
+
 def turnover(weights):
     """
     Average one-period turnover across a sequence of target weight vectors.

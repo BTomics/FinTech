@@ -19,3 +19,6 @@ cvxpy==1.9.2
 
 # M6 — paper trading (Alpaca)
 alpaca-py==0.43.4
+
+# M9 — risk overlay (GARCH conditional-vol forecast for vol-targeting)
+arch==7.2.0
