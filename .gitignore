@@ -1,6 +1,11 @@
 # Secrets — never commit (see fintech_coding_guidelines.md §5)
 .env
 
+# Local planning / guideline docs — kept on disk, not published
+development_plan.md
+fintech_coding_guidelines.md
+research_and_architecture_plan.md
+
 # Data — raw caches and derived artifacts stay out of git
 data/raw/*
 data/processed/*
