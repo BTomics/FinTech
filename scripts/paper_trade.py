@@ -2,8 +2,13 @@
 
 Pipeline:
   bars -> today's composite signal (momentum + reversal + illiquidity)
-       -> mean-variance target -> compare to live Alpaca positions
-       -> market orders -> reconciliation log.
+       -> mean-variance target -> CANCEL any stale queued orders
+       -> compare to live Alpaca positions -> market orders -> reconciliation log.
+
+Each run is a fresh rebalance to today's target, so it first cancels any orders
+still queued from a prior run (e.g. unfilled over a weekend). Without that they
+stack on top of the new book and over-trade at the next open — compute_orders
+only sees FILLED positions, not pending orders.
 
 PAPER ONLY. Keys come from .env (ALPACA_API_KEY/SECRET/PAPER). Run from repo root:
     .venv\\Scripts\\python.exe scripts\\paper_trade.py
@@ -18,7 +23,13 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from fintech.portfolio.optimizer import estimate_covariance, optimize_weights
-from fintech.execution.broker import get_client, get_equity, get_positions, submit_orders
+from fintech.execution.broker import (
+    cancel_all_orders,
+    get_client,
+    get_equity,
+    get_positions,
+    submit_orders,
+)
 from fintech.execution.orders import compute_orders
 
 BARS_PATH = "data/processed/bars.parquet"
@@ -72,10 +83,14 @@ def main():
     target_weights, prices = latest_target_weights(bars)
 
     client = get_client()
+    # Clear any stale queued orders from a prior run BEFORE reading positions, so
+    # the new book doesn't stack on top of unfilled orders (see module docstring).
+    n_cancelled = cancel_all_orders(client)
     equity = get_equity(client)
     positions = get_positions(client)
 
     orders = compute_orders(target_weights, positions, prices, equity)
+    print(f"Cancelled {n_cancelled} stale open order(s).")
     print(f"Equity ${equity:,.0f} | {len(positions)} positions | "
           f"{(target_weights > 1e-6).sum()} target names | {len(orders)} orders")
 

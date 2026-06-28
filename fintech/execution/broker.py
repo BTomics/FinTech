@@ -40,6 +40,28 @@ def get_positions(client):
     return pd.Series({p.symbol: float(p.qty) for p in positions})
 
 
+def cancel_all_orders(client):
+    """
+    Cancel every open order; return the number cancelled.
+
+    Each daily run is a fresh target-book rebalance, so orders still queued from a
+    prior run (e.g. left unfilled over a weekend) are STALE and must be cleared
+    before submitting the new book. Otherwise they stack on top of it and
+    over-trade at the next open — compute_orders only diffs the target against
+    FILLED positions, it has no view of pending orders, so a half-filled queue
+    would double up. Clearing first makes every run converge to the current target
+    regardless of what's still queued.
+
+    Args:
+        client: alpaca TradingClient.
+
+    Returns:
+        int: count of open orders cancelled.
+    """
+    responses = client.cancel_orders()  # cancels ALL open orders for the account
+    return len(responses)
+
+
 def submit_orders(client, orders):
     """
     Submit each non-zero order as a market order; return submission records.
